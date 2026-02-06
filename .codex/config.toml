@@ -1,0 +1,27 @@
+﻿#:schema https://developers.openai.com/codex/config-schema.json
+
+################################################################################
+# Project-scoped Codex configuration: .codex/config.toml
+################################################################################
+
+# Default model for Codex. (Default shown in official sample.)
+model = "gpt-5.2-codex"
+model_provider = "openai"
+
+# Keep responses focused.
+model_reasoning_effort = "medium"
+model_reasoning_summary = "auto"
+model_verbosity = "medium"
+
+# Ask for approvals when needed.
+approval_policy = "on-request"
+
+# Use workspace-write sandbox so build/test can run and write bin/obj safely.
+sandbox_mode = "workspace-write"
+
+# Allow network in workspace-write so NuGet restore and Google API docs lookups can work.
+[sandbox_workspace_write]
+network_access = true
+exclude_tmpdir_env_var = false
+exclude_slash_tmp = false
+writable_roots = []

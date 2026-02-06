@@ -1,0 +1,33 @@
+﻿# Build outputs
+bin/
+obj/
+artifacts/
+
+# User-specific
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# VS / VSCode
+.vs/
+.vscode/
+*.code-workspace
+
+# Logs
+*.log
+logs/
+Logs/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# MSIX/packaging outputs
+AppPackages/
+BundleArtifacts/

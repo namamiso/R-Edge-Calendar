@@ -1,0 +1,10 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EdgeCalendar.Core\EdgeCalendar.Core.csproj" />
+    <ProjectReference Include="..\EdgeCalendar.Infrastructure\EdgeCalendar.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

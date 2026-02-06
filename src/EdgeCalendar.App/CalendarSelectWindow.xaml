@@ -1,0 +1,24 @@
+﻿<Window x:Class="EdgeCalendar.App.CalendarSelectWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="カレンダー選択"
+        Width="360"
+        Height="420"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="12">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+            <Button Content="キャンセル" Width="90" Margin="0,0,8,0" Click="OnCancel" />
+            <Button Content="OK" Width="90" Click="OnOk" />
+        </StackPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ItemsControl x:Name="CalendarList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <CheckBox Content="{Binding Summary}" IsChecked="{Binding IsSelected}" Margin="0,4" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

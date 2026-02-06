@@ -1,0 +1,13 @@
+﻿<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>false</ContinuousIntegrationBuild>
+
+    <!-- WPF projects set this in their own csproj -->
+  </PropertyGroup>
+</Project>

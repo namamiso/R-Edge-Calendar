@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EdgeCalendar.Core\EdgeCalendar.Core.csproj" />
+    <ProjectReference Include="..\EdgeCalendar.Infrastructure\EdgeCalendar.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

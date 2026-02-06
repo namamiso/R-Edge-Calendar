@@ -1,0 +1,36 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31912.275
+MinimumVisualStudioVersion = 10.0.40219.1
+Project(""{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}"") = "EdgeCalendar.App", "src\\EdgeCalendar.App\\EdgeCalendar.App.csproj", "{61DA8F44-9568-405F-BBBD-6189002BC3C4}"
+EndProject
+Project(""{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}"") = "EdgeCalendar.Core", "src\\EdgeCalendar.Core\\EdgeCalendar.Core.csproj", "{FEE18857-3369-44C7-9434-B9717888C270}"
+EndProject
+Project(""{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}"") = "EdgeCalendar.Infrastructure", "src\\EdgeCalendar.Infrastructure\\EdgeCalendar.Infrastructure.csproj", "{FAD9D198-F0E9-41C2-9DB1-603E5B0DF294}"
+EndProject
+Project(""{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}"") = "EdgeCalendar.Tests", "src\\EdgeCalendar.Tests\\EdgeCalendar.Tests.csproj", "{4B466954-411A-4B65-AFD9-310A8263ED13}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{61DA8F44-9568-405F-BBBD-6189002BC3C4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{61DA8F44-9568-405F-BBBD-6189002BC3C4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{61DA8F44-9568-405F-BBBD-6189002BC3C4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{61DA8F44-9568-405F-BBBD-6189002BC3C4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FEE18857-3369-44C7-9434-B9717888C270}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FEE18857-3369-44C7-9434-B9717888C270}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FEE18857-3369-44C7-9434-B9717888C270}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FEE18857-3369-44C7-9434-B9717888C270}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FAD9D198-F0E9-41C2-9DB1-603E5B0DF294}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FAD9D198-F0E9-41C2-9DB1-603E5B0DF294}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FAD9D198-F0E9-41C2-9DB1-603E5B0DF294}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FAD9D198-F0E9-41C2-9DB1-603E5B0DF294}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4B466954-411A-4B65-AFD9-310A8263ED13}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4B466954-411A-4B65-AFD9-310A8263ED13}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4B466954-411A-4B65-AFD9-310A8263ED13}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4B466954-411A-4B65-AFD9-310A8263ED13}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
