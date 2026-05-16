@@ -19,14 +19,8 @@ namespace EdgeCalendar.Infrastructure
 
         public async Task InitializeAsync()
         {
-            var dir = Path.GetDirectoryName(_dbPath);
-            if (!string.IsNullOrWhiteSpace(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
@@ -42,7 +36,8 @@ CREATE TABLE IF NOT EXISTS Events (
     Source TEXT NOT NULL DEFAULT 'local',
     ExternalId TEXT NULL,
     CalendarId TEXT NULL,
-    IsReadOnly INTEGER NOT NULL DEFAULT 0
+    IsReadOnly INTEGER NOT NULL DEFAULT 0,
+    ETag TEXT NULL
 );
 ";
             await cmd.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -51,6 +46,7 @@ CREATE TABLE IF NOT EXISTS Events (
             await EnsureColumnAsync(conn, "Events", "ExternalId", "TEXT NULL");
             await EnsureColumnAsync(conn, "Events", "CalendarId", "TEXT NULL");
             await EnsureColumnAsync(conn, "Events", "IsReadOnly", "INTEGER NOT NULL DEFAULT 0");
+            await EnsureColumnAsync(conn, "Events", "ETag", "TEXT NULL");
 
             var indexCmd = conn.CreateCommand();
             indexCmd.CommandText = @"
@@ -62,23 +58,28 @@ ON Events (Source, ExternalId, CalendarId);
 
         public async Task<IReadOnlyList<EventItem>> GetByDateAsync(DateTime dateLocal)
         {
-            var results = new List<EventItem>();
             var dayStart = dateLocal.Date;
             var dayEnd = dayStart.AddDays(1);
+            return await GetByRangeAsync(dayStart, dayEnd).ConfigureAwait(false);
+        }
 
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+        public async Task<IReadOnlyList<EventItem>> GetByRangeAsync(DateTime startLocal, DateTime endLocal)
+        {
+            var results = new List<EventItem>();
+
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
 SELECT Id, Title, StartLocal, EndLocal, IsAllDay, Location, Notes, UpdatedAtLocal,
-       Source, ExternalId, CalendarId, IsReadOnly
+       Source, ExternalId, CalendarId, IsReadOnly, ETag
 FROM Events
 WHERE StartLocal < $next AND EndLocal > $start
 ORDER BY StartLocal;
 ";
-            cmd.Parameters.AddWithValue("$start", dayStart.ToString("o", CultureInfo.InvariantCulture));
-            cmd.Parameters.AddWithValue("$next", dayEnd.ToString("o", CultureInfo.InvariantCulture));
+            cmd.Parameters.AddWithValue("$start", startLocal.Date.ToString("o", CultureInfo.InvariantCulture));
+            cmd.Parameters.AddWithValue("$next", endLocal.Date.ToString("o", CultureInfo.InvariantCulture));
 
             await using var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -97,13 +98,13 @@ ORDER BY StartLocal;
                 item.Source = "local";
             }
 
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
-INSERT INTO Events (Title, StartLocal, EndLocal, IsAllDay, Location, Notes, UpdatedAtLocal, Source, ExternalId, CalendarId, IsReadOnly)
-VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $externalId, $calendarId, $readOnly);
+INSERT INTO Events (Title, StartLocal, EndLocal, IsAllDay, Location, Notes, UpdatedAtLocal, Source, ExternalId, CalendarId, IsReadOnly, ETag)
+VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $externalId, $calendarId, $readOnly, $etag);
 SELECT last_insert_rowid();
 ";
             BindEvent(cmd, item);
@@ -117,8 +118,8 @@ SELECT last_insert_rowid();
         {
             item.UpdatedAtLocal = DateTime.Now;
 
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
@@ -129,7 +130,12 @@ SET Title = $title,
     IsAllDay = $allDay,
     Location = $location,
     Notes = $notes,
-    UpdatedAtLocal = $updated
+    UpdatedAtLocal = $updated,
+    Source = $source,
+    ExternalId = $externalId,
+    CalendarId = $calendarId,
+    IsReadOnly = $readOnly,
+    ETag = $etag
 WHERE Id = $id;
 ";
             BindEvent(cmd, item);
@@ -140,8 +146,8 @@ WHERE Id = $id;
 
         public async Task DeleteAsync(long id)
         {
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = "DELETE FROM Events WHERE Id = $id;";
@@ -152,9 +158,35 @@ WHERE Id = $id;
 
         public async Task ReplaceExternalEventsAsync(string calendarId, DateTime windowStart, DateTime windowEnd, IReadOnlyList<EventItem> items)
         {
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
-            await using var tx = await conn.BeginTransactionAsync().ConfigureAwait(false);
+            var writable = new HashSet<string>(StringComparer.Ordinal);
+
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
+
+            var existingCmd = conn.CreateCommand();
+            existingCmd.CommandText = @"
+SELECT ExternalId
+FROM Events
+WHERE Source = 'google'
+  AND CalendarId = $calendarId
+  AND IsReadOnly = 0
+  AND StartLocal < $end
+  AND EndLocal > $start
+  AND ExternalId IS NOT NULL;
+";
+            existingCmd.Parameters.AddWithValue("$calendarId", calendarId);
+            existingCmd.Parameters.AddWithValue("$start", windowStart.ToString("o", CultureInfo.InvariantCulture));
+            existingCmd.Parameters.AddWithValue("$end", windowEnd.ToString("o", CultureInfo.InvariantCulture));
+
+            await using (var reader = await existingCmd.ExecuteReaderAsync().ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync().ConfigureAwait(false))
+                {
+                    writable.Add(reader.GetString(0));
+                }
+            }
+
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
 
             var deleteCmd = conn.CreateCommand();
             deleteCmd.Transaction = tx;
@@ -172,11 +204,17 @@ WHERE Source = 'google'
 
             foreach (var item in items)
             {
+                item.Source = "google";
+                if (!string.IsNullOrEmpty(item.ExternalId) && writable.Contains(item.ExternalId))
+                {
+                    item.IsReadOnly = false;
+                }
+
                 var insertCmd = conn.CreateCommand();
                 insertCmd.Transaction = tx;
                 insertCmd.CommandText = @"
-INSERT INTO Events (Title, StartLocal, EndLocal, IsAllDay, Location, Notes, UpdatedAtLocal, Source, ExternalId, CalendarId, IsReadOnly)
-VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $externalId, $calendarId, $readOnly);
+INSERT INTO Events (Title, StartLocal, EndLocal, IsAllDay, Location, Notes, UpdatedAtLocal, Source, ExternalId, CalendarId, IsReadOnly, ETag)
+VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $externalId, $calendarId, $readOnly, $etag);
 ";
                 BindEvent(insertCmd, item);
                 await insertCmd.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -198,6 +236,7 @@ VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $ex
             cmd.Parameters.AddWithValue("$externalId", (object?)item.ExternalId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$calendarId", (object?)item.CalendarId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$readOnly", item.IsReadOnly ? 1 : 0);
+            cmd.Parameters.AddWithValue("$etag", (object?)item.ETag ?? DBNull.Value);
         }
 
         private static EventItem ReadEvent(SqliteDataReader reader)
@@ -215,7 +254,8 @@ VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $ex
                 Source = reader.IsDBNull(8) ? "local" : reader.GetString(8),
                 ExternalId = reader.IsDBNull(9) ? null : reader.GetString(9),
                 CalendarId = reader.IsDBNull(10) ? null : reader.GetString(10),
-                IsReadOnly = !reader.IsDBNull(11) && reader.GetInt64(11) != 0
+                IsReadOnly = !reader.IsDBNull(11) && reader.GetInt64(11) != 0,
+                ETag = reader.IsDBNull(12) ? null : reader.GetString(12)
             };
         }
 
@@ -245,6 +285,23 @@ VALUES ($title, $start, $end, $allDay, $location, $notes, $updated, $source, $ex
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "EdgeCalendar");
             return Path.Combine(baseDir, "edgecalendar.db");
+        }
+
+        private SqliteConnection CreateConnection()
+        {
+            return SqliteConnectionFactory.Create(_dbPath);
+        }
+
+        private async Task OpenAsync(SqliteConnection conn)
+        {
+            try
+            {
+                await conn.OpenAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
+            {
+                throw SqliteConnectionFactory.CreateOpenException(_dbPath, ex);
+            }
         }
     }
 }

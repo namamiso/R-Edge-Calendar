@@ -1,13 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using EdgeCalendar.Core;
+using System.Runtime.Versioning;
 
 namespace EdgeCalendar.Infrastructure
 {
+    [SupportedOSPlatform("windows")]
     public sealed class GoogleCalendarClient
     {
         private readonly HttpClient _http;
@@ -86,7 +90,7 @@ namespace EdgeCalendar.Infrastructure
                 {
                     foreach (var e in data.Items)
                     {
-                        var mapped = MapEvent(calendarId, e);
+                        var mapped = MapEvent(calendarId, e, true);
                         if (mapped != null)
                         {
                             items.Add(mapped);
@@ -100,7 +104,105 @@ namespace EdgeCalendar.Infrastructure
             return items;
         }
 
-        private static EventItem? MapEvent(string calendarId, EventResource resource)
+        public async Task<EventItem> CreateEventAsync(string calendarId, EventItem item)
+        {
+            var url = $"https://www.googleapis.com/calendar/v3/calendars/{Uri.EscapeDataString(calendarId)}/events";
+            var payload = BuildEventWrite(item);
+            var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions.Default), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", await _auth.GetAccessTokenAsync().ConfigureAwait(false));
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var data = JsonSerializer.Deserialize<EventResource>(json, JsonOptions.Default)
+                       ?? throw new InvalidOperationException("イベント作成の応答を解析できません。");
+
+            var mapped = MapEvent(calendarId, data, false);
+            if (mapped == null)
+            {
+                throw new InvalidOperationException("イベント作成の応答が不正です。");
+            }
+
+            return mapped;
+        }
+
+        public async Task<EventItem> UpdateEventAsync(string calendarId, string eventId, EventItem item)
+        {
+            var url = $"https://www.googleapis.com/calendar/v3/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}";
+            var payload = BuildEventWrite(item);
+            var request = new HttpRequestMessage(HttpMethod.Patch, url)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions.Default), Encoding.UTF8, "application/json")
+            };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", await _auth.GetAccessTokenAsync().ConfigureAwait(false));
+
+            if (!string.IsNullOrWhiteSpace(item.ETag))
+            {
+                request.Headers.TryAddWithoutValidation("If-Match", item.ETag);
+            }
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.PreconditionFailed)
+            {
+                var serverJson = await GetEventJsonAsync(calendarId, eventId).ConfigureAwait(false);
+                throw new ConflictException("更新競合が発生しました。", serverJson);
+            }
+
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var data = JsonSerializer.Deserialize<EventResource>(json, JsonOptions.Default)
+                       ?? throw new InvalidOperationException("イベント更新の応答を解析できません。");
+
+            var mapped = MapEvent(calendarId, data, false);
+            if (mapped == null)
+            {
+                throw new InvalidOperationException("イベント更新の応答が不正です。");
+            }
+
+            return mapped;
+        }
+
+        public async Task DeleteEventAsync(string calendarId, string eventId, string? etag)
+        {
+            var url = $"https://www.googleapis.com/calendar/v3/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}";
+            var request = new HttpRequestMessage(HttpMethod.Delete, url);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", await _auth.GetAccessTokenAsync().ConfigureAwait(false));
+
+            if (!string.IsNullOrWhiteSpace(etag))
+            {
+                request.Headers.TryAddWithoutValidation("If-Match", etag);
+            }
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.PreconditionFailed)
+            {
+                var serverJson = await GetEventJsonAsync(calendarId, eventId).ConfigureAwait(false);
+                throw new ConflictException("削除競合が発生しました。", serverJson);
+            }
+
+            response.EnsureSuccessStatusCode();
+        }
+
+        private async Task<string?> GetEventJsonAsync(string calendarId, string eventId)
+        {
+            var url = $"https://www.googleapis.com/calendar/v3/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}";
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", await _auth.GetAccessTokenAsync().ConfigureAwait(false));
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        }
+
+        private static EventItem? MapEvent(string calendarId, EventResource resource, bool readOnly)
         {
             if (string.IsNullOrWhiteSpace(resource.Id) || resource.Status == "cancelled")
             {
@@ -151,8 +253,34 @@ namespace EdgeCalendar.Infrastructure
                 Source = "google",
                 ExternalId = resource.Id,
                 CalendarId = calendarId,
-                IsReadOnly = true
+                IsReadOnly = readOnly,
+                ETag = resource.ETag
             };
+        }
+
+        private static EventWrite BuildEventWrite(EventItem item)
+        {
+            var write = new EventWrite
+            {
+                Summary = item.Title,
+                Location = item.Location,
+                Description = item.Notes,
+                Start = new EventTimeWrite(),
+                End = new EventTimeWrite()
+            };
+
+            if (item.IsAllDay)
+            {
+                write.Start.Date = item.StartLocal.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                write.End.Date = item.EndLocal.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                write.Start.DateTime = new DateTimeOffset(item.StartLocal).ToString("o", CultureInfo.InvariantCulture);
+                write.End.DateTime = new DateTimeOffset(item.EndLocal).ToString("o", CultureInfo.InvariantCulture);
+            }
+
+            return write;
         }
 
         private sealed class CalendarListResponse
@@ -181,11 +309,27 @@ namespace EdgeCalendar.Infrastructure
             public string? Status { get; set; }
             public string? Description { get; set; }
             public string? Location { get; set; }
+            public string? ETag { get; set; }
             public EventTime? Start { get; set; }
             public EventTime? End { get; set; }
         }
 
         private sealed class EventTime
+        {
+            public string? Date { get; set; }
+            public string? DateTime { get; set; }
+        }
+
+        private sealed class EventWrite
+        {
+            public string? Summary { get; set; }
+            public string? Location { get; set; }
+            public string? Description { get; set; }
+            public EventTimeWrite? Start { get; set; }
+            public EventTimeWrite? End { get; set; }
+        }
+
+        private sealed class EventTimeWrite
         {
             public string? Date { get; set; }
             public string? DateTime { get; set; }

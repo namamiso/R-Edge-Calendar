@@ -22,6 +22,7 @@ Lightweight Windows 11 resident calendar panel.
 - docs/UI-SPEC.md (panel behavior)
 - docs/SYNC-SPEC.md (sync rules)
 - docs/ADR/ (architecture decisions)
+- docs/RELEASE.md (release steps)
 
 ## Security
 - docs/SECURITY.md

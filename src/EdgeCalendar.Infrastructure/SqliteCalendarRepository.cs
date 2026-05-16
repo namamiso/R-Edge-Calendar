@@ -18,14 +18,8 @@ namespace EdgeCalendar.Infrastructure
 
         public async Task InitializeAsync()
         {
-            var dir = Path.GetDirectoryName(_dbPath);
-            if (!string.IsNullOrWhiteSpace(dir))
-            {
-                Directory.CreateDirectory(dir);
-            }
-
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = @"
@@ -43,8 +37,8 @@ CREATE TABLE IF NOT EXISTS Calendars (
         {
             var results = new List<CalendarInfo>();
 
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
 
             var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT Id, Summary, BackgroundColor, IsSelected FROM Calendars ORDER BY Summary;";
@@ -66,9 +60,9 @@ CREATE TABLE IF NOT EXISTS Calendars (
 
         public async Task UpsertAsync(IReadOnlyList<CalendarInfo> calendars)
         {
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
-            await using var tx = await conn.BeginTransactionAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
 
             foreach (var calendar in calendars)
             {
@@ -94,9 +88,9 @@ ON CONFLICT(Id) DO UPDATE SET
 
         public async Task UpdateSelectionAsync(IReadOnlyList<CalendarInfo> calendars)
         {
-            await using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            await conn.OpenAsync().ConfigureAwait(false);
-            await using var tx = await conn.BeginTransactionAsync().ConfigureAwait(false);
+            await using var conn = CreateConnection();
+            await OpenAsync(conn).ConfigureAwait(false);
+            await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync().ConfigureAwait(false);
 
             foreach (var calendar in calendars)
             {
@@ -118,6 +112,23 @@ ON CONFLICT(Id) DO UPDATE SET
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "EdgeCalendar");
             return Path.Combine(baseDir, "edgecalendar.db");
+        }
+
+        private SqliteConnection CreateConnection()
+        {
+            return SqliteConnectionFactory.Create(_dbPath);
+        }
+
+        private async Task OpenAsync(SqliteConnection conn)
+        {
+            try
+            {
+                await conn.OpenAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException)
+            {
+                throw SqliteConnectionFactory.CreateOpenException(_dbPath, ex);
+            }
         }
     }
 }

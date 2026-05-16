@@ -18,21 +18,26 @@ using Forms = System.Windows.Forms;
 
 namespace EdgeCalendar.App
 {
-    public partial class MainWindow : Window
+    public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        private const int EdgeMinPx = 2;
-        private const int EdgeMaxPx = 6;
+        private const int EdgeMinPx = 1;
+        private const int EdgeMaxPx = 10;
         private const int DwellMs = 100;
         private const int HideGraceMs = 250;
-        private const int PollNormalMs = 100;
+        private const int PollNormalMs = 50;
         private const int PollNearEdgeMs = 16;
         private const int HotkeyId = 0xECAD;
+        private const string DefaultEventColor = "#0067C0";
+        private const int PanelInsetPx = 14;
 
         private readonly DispatcherTimer _timer;
         private readonly IEventRepository _repository;
         private readonly ICalendarRepository _calendarRepository;
         private readonly GoogleCalendarClient _calendarClient;
+        private readonly GoogleCredentialStore _credentialStore;
+        private readonly ConflictLogWriter _conflictLog;
         private readonly ObservableCollection<EventListItem> _events = new();
+        private readonly ObservableCollection<CalendarDayItem> _calendarDays = new();
         private bool _isShown;
         private bool _allowClose;
         private bool _hotkeyRegistered;
@@ -41,7 +46,11 @@ namespace EdgeCalendar.App
         private HwndSource? _source;
         private IntPtr _hwnd;
         private EventListItem? _selectedEvent;
+        private DateTime _selectedDate = DateTime.Today;
+        private DateTime _visibleMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
         private DateTime _lastSyncUtc = DateTime.MinValue;
+        private string _monthTitle = string.Empty;
+        private string _selectedDateLabel = string.Empty;
 
         public MainWindow()
         {
@@ -52,13 +61,17 @@ namespace EdgeCalendar.App
             _calendarRepository = new SqliteCalendarRepository();
             var http = new HttpClient();
             var tokenStore = new TokenStore();
-            var auth = new GoogleAuthClient(http, tokenStore);
+            _credentialStore = new GoogleCredentialStore();
+            var auth = new GoogleAuthClient(http, tokenStore, _credentialStore);
             _calendarClient = new GoogleCalendarClient(http, auth);
+            _conflictLog = new ConflictLogWriter();
+
+            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollNormalMs) };
+            _timer.Tick += (_, __) => Tick();
 
             Loaded += async (_, __) =>
             {
                 HideInstant();
-                CalendarControl.SelectedDate = DateTime.Today;
                 await RunSafeAsync(InitializeAsync);
                 _timer.Start();
             };
@@ -77,12 +90,30 @@ namespace EdgeCalendar.App
                     _source.RemoveHook(WndProc);
                 }
             };
-
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollNormalMs) };
-            _timer.Tick += (_, __) => Tick();
         }
 
         public ObservableCollection<EventListItem> Events => _events;
+        public ObservableCollection<CalendarDayItem> CalendarDays => _calendarDays;
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public string MonthTitle
+        {
+            get => _monthTitle;
+            private set
+            {
+                _monthTitle = value;
+                OnPropertyChanged(nameof(MonthTitle));
+            }
+        }
+
+        public string SelectedDateLabel
+        {
+            get => _selectedDateLabel;
+            private set
+            {
+                _selectedDateLabel = value;
+                OnPropertyChanged(nameof(SelectedDateLabel));
+            }
+        }
 
         protected override void OnSourceInitialized(EventArgs e)
         {
@@ -96,7 +127,7 @@ namespace EdgeCalendar.App
             _hotkeyRegistered = RegisterHotKey(_hwnd, HotkeyId, MOD_WIN | MOD_ALT, (uint)Forms.Keys.C);
             if (!_hotkeyRegistered)
             {
-                (Application.Current as App)?.ShowTrayMessage("Win+Alt+C の登録に失敗しました。");
+                (System.Windows.Application.Current as App)?.ShowTrayMessage("Win+Alt+C の登録に失敗しました。");
             }
         }
 
@@ -123,23 +154,161 @@ namespace EdgeCalendar.App
         {
             await _repository.InitializeAsync();
             await _calendarRepository.InitializeAsync();
+            await RefreshCalendarDaysAsync();
             await LoadEventsForSelectedDateAsync();
         }
 
         private async Task LoadEventsForSelectedDateAsync()
         {
-            var date = CalendarControl.SelectedDate ?? DateTime.Today;
-            var items = await _repository.GetByDateAsync(date);
+            var items = await _repository.GetByDateAsync(_selectedDate);
+            var calendarColors = await GetCalendarColorsAsync();
 
             _events.Clear();
             foreach (var item in items)
             {
-                _events.Add(new EventListItem(item));
+                _events.Add(new EventListItem(item, GetEventColor(item, calendarColors)));
             }
 
             _selectedEvent = null;
             EventsList.SelectedItem = null;
             UpdateButtons();
+        }
+
+        private async Task RefreshCalendarDaysAsync()
+        {
+            var (start, end) = GetCalendarRange();
+            var rangeEvents = await _repository.GetByRangeAsync(start, end.AddDays(1));
+            var calendarColors = await GetCalendarColorsAsync();
+            var eventsByDate = GroupEventsByDate(start, end, rangeEvents, calendarColors);
+            UpdateCalendarDays(eventsByDate);
+        }
+
+        private void UpdateCalendarDays(IReadOnlyDictionary<DateTime, IReadOnlyList<CalendarEventPreviewItem>> eventsByDate)
+        {
+            MonthTitle = _visibleMonth.ToString("yyyy年M月", CultureInfo.CurrentCulture);
+            SelectedDateLabel = _selectedDate.ToString("yyyy年M月d日 (ddd)", CultureInfo.CurrentCulture);
+
+            _calendarDays.Clear();
+            var (start, end) = GetCalendarRange();
+            var holidays = new Dictionary<DateTime, string>();
+            for (int year = start.Year; year <= end.Year; year++)
+            {
+                foreach (var holiday in JapanHolidayCalendar.GetHolidays(year))
+                {
+                    holidays[holiday.Key] = holiday.Value;
+                }
+            }
+
+            for (int i = 0; i < 42; i++)
+            {
+                var date = start.AddDays(i);
+                holidays.TryGetValue(date.Date, out var holidayName);
+                eventsByDate.TryGetValue(date.Date, out var dayEvents);
+                _calendarDays.Add(new CalendarDayItem
+                {
+                    Date = date,
+                    DayText = date.Day.ToString(CultureInfo.InvariantCulture),
+                    IsCurrentMonth = date.Month == _visibleMonth.Month,
+                    IsToday = date.Date == DateTime.Today,
+                    IsSelected = date.Date == _selectedDate.Date,
+                    IsRedDay = date.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday || holidayName != null,
+                    HolidayName = holidayName,
+                    Events = dayEvents ?? Array.Empty<CalendarEventPreviewItem>()
+                });
+            }
+        }
+
+        private (DateTime Start, DateTime End) GetCalendarRange()
+        {
+            int offset = (int)_visibleMonth.DayOfWeek;
+            var start = _visibleMonth.AddDays(-offset);
+            return (start, start.AddDays(41));
+        }
+
+        private static IReadOnlyDictionary<DateTime, IReadOnlyList<CalendarEventPreviewItem>> GroupEventsByDate(
+            DateTime start,
+            DateTime end,
+            IReadOnlyList<EventItem> events,
+            IReadOnlyDictionary<string, string> calendarColors)
+        {
+            var map = new Dictionary<DateTime, IReadOnlyList<CalendarEventPreviewItem>>();
+
+            for (var date = start.Date; date <= end.Date; date = date.AddDays(1))
+            {
+                var dayStart = date;
+                var dayEnd = date.AddDays(1);
+                var items = events
+                    .Where(e => e.StartLocal < dayEnd && e.EndLocal > dayStart)
+                    .OrderBy(e => e.IsAllDay ? 0 : 1)
+                    .ThenBy(e => e.StartLocal)
+                    .Select(e => new CalendarEventPreviewItem(e, FormatCalendarEventTime(e, date), GetEventColor(e, calendarColors)))
+                    .ToList();
+
+                if (items.Count > 0)
+                {
+                    map[date] = items;
+                }
+            }
+
+            return map;
+        }
+
+        private static string FormatCalendarEventTime(EventItem item, DateTime date)
+        {
+            if (item.IsAllDay)
+            {
+                return "終日";
+            }
+
+            if (item.StartLocal.Date < date.Date)
+            {
+                return "継続";
+            }
+
+            return item.StartLocal.ToString("H:mm", CultureInfo.CurrentCulture);
+        }
+
+        private async Task<IReadOnlyDictionary<string, string>> GetCalendarColorsAsync()
+        {
+            var calendars = await _calendarRepository.GetAllAsync();
+            return calendars
+                .Where(c => !string.IsNullOrWhiteSpace(c.Id))
+                .ToDictionary(
+                    c => c.Id,
+                    c => NormalizeColor(c.BackgroundColor),
+                    StringComparer.Ordinal);
+        }
+
+        private static string GetEventColor(EventItem item, IReadOnlyDictionary<string, string> calendarColors)
+        {
+            if (!string.IsNullOrWhiteSpace(item.CalendarId) &&
+                calendarColors.TryGetValue(item.CalendarId, out var color))
+            {
+                return color;
+            }
+
+            return DefaultEventColor;
+        }
+
+        private static string NormalizeColor(string? color)
+        {
+            if (string.IsNullOrWhiteSpace(color))
+            {
+                return DefaultEventColor;
+            }
+
+            var value = color.Trim();
+            if (value.Length == 7 && value[0] == '#' && value.Skip(1).All(Uri.IsHexDigit))
+            {
+                return value;
+            }
+
+            if (value.Length == 9 && value[0] == '#' && value.Skip(1).All(Uri.IsHexDigit))
+            {
+                return value;
+            }
+
+            return DefaultEventColor;
         }
 
         private void Tick()
@@ -167,6 +336,10 @@ namespace EdgeCalendar.App
                         if (!IsFullscreenSuppressed(screen))
                         {
                             ShowWithFade(wa);
+                        }
+                        else
+                        {
+                            _edgeEnterAt = DateTime.MaxValue;
                         }
                     }
                 }
@@ -201,22 +374,30 @@ namespace EdgeCalendar.App
             _isShown = true;
             _hideAfter = DateTime.MaxValue;
 
-            Height = wa.Height;
-            Top = wa.Top;
+            Height = Math.Max(400, wa.Height - (PanelInsetPx * 2));
+            Top = wa.Top + PanelInsetPx;
 
+            BeginAnimation(LeftProperty, null);
             Left = wa.Right;
             Show();
-            Left = wa.Right - Width;
 
-            var anim = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+            double visibleLeft = wa.Right - Width - PanelInsetPx;
+            var duration = TimeSpan.FromMilliseconds(220);
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var slide = new DoubleAnimation(wa.Right, visibleLeft, duration)
             {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+                EasingFunction = easing
             };
-            BeginAnimation(OpacityProperty, anim);
+            var fade = new DoubleAnimation(0, 1, duration)
+            {
+                EasingFunction = easing
+            };
+            BeginAnimation(LeftProperty, slide);
+            BeginAnimation(OpacityProperty, fade);
 
             if (DateTime.UtcNow - _lastSyncUtc > TimeSpan.FromMinutes(10))
             {
-                _ = RunSafeAsync(SyncAsync);
+                _ = RunGoogleSafeAsync(SyncAsync);
             }
         }
 
@@ -226,20 +407,29 @@ namespace EdgeCalendar.App
             _hideAfter = DateTime.MaxValue;
             _edgeEnterAt = DateTime.MaxValue;
 
-            var anim = new DoubleAnimation(Opacity, 0, TimeSpan.FromMilliseconds(160))
+            BeginAnimation(LeftProperty, null);
+            var duration = TimeSpan.FromMilliseconds(180);
+            var easing = new CubicEase { EasingMode = EasingMode.EaseIn };
+            var slide = new DoubleAnimation(Left, wa.Right, duration)
             {
-                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseIn }
+                EasingFunction = easing
             };
-            anim.Completed += (_, __) =>
+            var fade = new DoubleAnimation(Opacity, 0, duration)
+            {
+                EasingFunction = easing
+            };
+            slide.Completed += (_, __) =>
             {
                 HideInstant();
                 Left = wa.Right;
             };
-            BeginAnimation(OpacityProperty, anim);
+            BeginAnimation(LeftProperty, slide);
+            BeginAnimation(OpacityProperty, fade);
         }
 
         private void HideInstant()
         {
+            BeginAnimation(LeftProperty, null);
             BeginAnimation(OpacityProperty, null);
             Opacity = 0;
             Hide();
@@ -298,9 +488,41 @@ namespace EdgeCalendar.App
                    rect.Bottom >= bounds.Bottom - tolerance;
         }
 
-        private async void OnSelectedDateChanged(object? sender, SelectionChangedEventArgs e)
+        private async void OnCalendarDayClick(object sender, RoutedEventArgs e)
         {
+            if (sender is not System.Windows.Controls.Button { CommandParameter: DateTime date })
+            {
+                return;
+            }
+
+            var previousVisibleMonth = _visibleMonth;
+            _selectedDate = date.Date;
+            _visibleMonth = new DateTime(_selectedDate.Year, _selectedDate.Month, 1);
+            if (_visibleMonth != previousVisibleMonth)
+            {
+                _ = RunGoogleSafeAsync(SyncVisibleMonthAsync);
+            }
+
+            await RunSafeAsync(RefreshCalendarDaysAsync);
             await RunSafeAsync(LoadEventsForSelectedDateAsync);
+        }
+
+        private async void OnPreviousMonthClick(object sender, RoutedEventArgs e)
+        {
+            _visibleMonth = _visibleMonth.AddMonths(-1);
+            _selectedDate = _visibleMonth;
+            await RunSafeAsync(RefreshCalendarDaysAsync);
+            await RunSafeAsync(LoadEventsForSelectedDateAsync);
+            _ = RunGoogleSafeAsync(SyncVisibleMonthAsync);
+        }
+
+        private async void OnNextMonthClick(object sender, RoutedEventArgs e)
+        {
+            _visibleMonth = _visibleMonth.AddMonths(1);
+            _selectedDate = _visibleMonth;
+            await RunSafeAsync(RefreshCalendarDaysAsync);
+            await RunSafeAsync(LoadEventsForSelectedDateAsync);
+            _ = RunGoogleSafeAsync(SyncVisibleMonthAsync);
         }
 
         private void OnEventSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -319,72 +541,139 @@ namespace EdgeCalendar.App
             DeleteButton.IsEnabled = hasSelection && !isReadOnly;
         }
 
-        private void OnAddClick(object sender, RoutedEventArgs e)
+        private async void OnAddClick(object sender, RoutedEventArgs e)
         {
-            var date = CalendarControl.SelectedDate ?? DateTime.Today;
-            var editor = new EventEditorWindow(null, date) { Owner = this };
+            var calendars = await GetSelectedCalendarsAsync();
+            if (calendars.Count == 0)
+            {
+                return;
+            }
+
+            var editor = new EventEditorWindow(null, _selectedDate, calendars, calendars[0].Id, true) { Owner = this };
             if (editor.ShowDialog() == true)
             {
-                _ = RunSafeAsync(() => CreateEventAsync(editor.Item));
+                var calendarId = editor.SelectedCalendarId;
+                if (calendarId == null)
+                {
+                    return;
+                }
+
+                await RunGoogleSafeAsync(() => CreateEventAsync(calendarId, editor.Item));
             }
         }
 
-        private void OnEditClick(object sender, RoutedEventArgs e)
+        private async void OnEditClick(object sender, RoutedEventArgs e)
         {
             if (_selectedEvent == null)
             {
                 return;
             }
 
-            var editor = new EventEditorWindow(_selectedEvent.Item.Clone(), _selectedEvent.Item.StartLocal) { Owner = this };
+            IReadOnlyList<CalendarInfo> calendars = Array.Empty<CalendarInfo>();
+            if (_selectedEvent.Item.Source == "google")
+            {
+                calendars = await GetSelectedCalendarsAsync();
+                if (calendars.Count == 0)
+                {
+                    return;
+                }
+            }
+
+            var editor = new EventEditorWindow(_selectedEvent.Item.Clone(), _selectedEvent.Item.StartLocal, calendars, _selectedEvent.Item.CalendarId, false) { Owner = this };
             if (editor.ShowDialog() == true)
             {
-                _ = RunSafeAsync(() => UpdateEventAsync(editor.Item));
+                await RunGoogleSafeAsync(() => UpdateEventAsync(editor.Item));
             }
         }
 
-        private void OnDeleteClick(object sender, RoutedEventArgs e)
+        private async void OnDeleteClick(object sender, RoutedEventArgs e)
         {
             if (_selectedEvent == null)
             {
                 return;
             }
 
-            var result = MessageBox.Show("予定を削除しますか？", "EdgeCalendar", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            var result = System.Windows.MessageBox.Show("予定を削除しますか？", "EdgeCalendar", MessageBoxButton.YesNo, MessageBoxImage.Warning);
             if (result == MessageBoxResult.Yes)
             {
-                _ = RunSafeAsync(() => DeleteEventAsync(_selectedEvent.Item.Id));
+                await RunGoogleSafeAsync(() => DeleteEventAsync(_selectedEvent.Item));
             }
         }
 
-        private async Task CreateEventAsync(EventItem item)
+        private async Task CreateEventAsync(string calendarId, EventItem item)
         {
-            item.Source = "local";
-            item.IsReadOnly = false;
-            await _repository.CreateAsync(item);
+            var created = await _calendarClient.CreateEventAsync(calendarId, item);
+
+            created.Source = "google";
+            created.CalendarId = calendarId;
+            created.IsReadOnly = false;
+
+            await _repository.CreateAsync(created);
+            await RefreshCalendarDaysAsync();
             await LoadEventsForSelectedDateAsync();
         }
 
         private async Task UpdateEventAsync(EventItem item)
         {
+            if (item.Source == "google")
+            {
+                if (string.IsNullOrEmpty(item.CalendarId) || string.IsNullOrEmpty(item.ExternalId))
+                {
+                    throw new InvalidOperationException("Googleイベントの識別子がありません。");
+                }
+
+                try
+                {
+                    var updated = await _calendarClient.UpdateEventAsync(item.CalendarId, item.ExternalId, item);
+                    item.ETag = updated.ETag;
+                }
+                catch (ConflictException ex)
+                {
+                    await _conflictLog.SaveDraftAsync("update", item, ex.ServerJson);
+                    await RunSafeAsync(SyncAsync);
+                    throw new InvalidOperationException("競合が発生したため最新データを取得しました。");
+                }
+            }
+
             await _repository.UpdateAsync(item);
+            await RefreshCalendarDaysAsync();
             await LoadEventsForSelectedDateAsync();
         }
 
-        private async Task DeleteEventAsync(long id)
+        private async Task DeleteEventAsync(EventItem item)
         {
-            await _repository.DeleteAsync(id);
+            if (item.Source == "google")
+            {
+                if (string.IsNullOrEmpty(item.CalendarId) || string.IsNullOrEmpty(item.ExternalId))
+                {
+                    throw new InvalidOperationException("Googleイベントの識別子がありません。");
+                }
+
+                try
+                {
+                    await _calendarClient.DeleteEventAsync(item.CalendarId, item.ExternalId, item.ETag);
+                }
+                catch (ConflictException ex)
+                {
+                    await _conflictLog.SaveDraftAsync("delete", item, ex.ServerJson);
+                    await RunSafeAsync(SyncAsync);
+                    throw new InvalidOperationException("競合が発生したため最新データを取得しました。");
+                }
+            }
+
+            await _repository.DeleteAsync(item.Id);
+            await RefreshCalendarDaysAsync();
             await LoadEventsForSelectedDateAsync();
         }
 
         private async void OnSyncClick(object sender, RoutedEventArgs e)
         {
-            await RunSafeAsync(SyncAsync);
+            await RunGoogleSafeAsync(SyncVisibleMonthAsync);
         }
 
         private async void OnCalendarsClick(object sender, RoutedEventArgs e)
         {
-            await RunSafeAsync(ShowCalendarSelectionAsync);
+            await RunGoogleSafeAsync(ShowCalendarSelectionAsync);
         }
 
         private async Task ShowCalendarSelectionAsync()
@@ -392,7 +681,7 @@ namespace EdgeCalendar.App
             var calendars = await EnsureCalendarsAsync();
             if (calendars.Count == 0)
             {
-                MessageBox.Show("利用可能なカレンダーがありません。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("利用可能なカレンダーがありません。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -401,6 +690,24 @@ namespace EdgeCalendar.App
             {
                 await _calendarRepository.UpdateSelectionAsync(dialog.SelectedCalendars);
             }
+        }
+
+        private async Task<List<CalendarInfo>> GetSelectedCalendarsAsync()
+        {
+            var calendars = (await _calendarRepository.GetAllAsync()).ToList();
+            if (calendars.Count == 0)
+            {
+                calendars = await EnsureCalendarsAsync();
+            }
+
+            var selected = calendars.Where(c => c.IsSelected).ToList();
+            if (selected.Count == 0)
+            {
+                System.Windows.MessageBox.Show("同期するカレンダーが選択されていません。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                return new List<CalendarInfo>();
+            }
+
+            return selected;
         }
 
         private async Task<List<CalendarInfo>> EnsureCalendarsAsync()
@@ -431,6 +738,20 @@ namespace EdgeCalendar.App
 
         private async Task SyncAsync()
         {
+            var windowStart = DateTime.Today.AddDays(-31);
+            var windowEnd = DateTime.Today.AddDays(32);
+            await SyncRangeAsync(windowStart, windowEnd);
+        }
+
+        private async Task SyncVisibleMonthAsync()
+        {
+            var windowStart = _visibleMonth.Date;
+            var windowEnd = _visibleMonth.AddMonths(1).Date;
+            await SyncRangeAsync(windowStart, windowEnd);
+        }
+
+        private async Task SyncRangeAsync(DateTime windowStart, DateTime windowEnd)
+        {
             var calendars = (await _calendarRepository.GetAllAsync()).ToList();
             if (calendars.Count == 0)
             {
@@ -440,12 +761,9 @@ namespace EdgeCalendar.App
             var selected = calendars.Where(c => c.IsSelected).ToList();
             if (selected.Count == 0)
             {
-                MessageBox.Show("同期するカレンダーが選択されていません。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("同期するカレンダーが選択されていません。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-
-            var windowStart = DateTime.Today.AddDays(-31);
-            var windowEnd = DateTime.Today.AddDays(32);
 
             foreach (var calendar in selected)
             {
@@ -454,7 +772,13 @@ namespace EdgeCalendar.App
             }
 
             _lastSyncUtc = DateTime.UtcNow;
+            await RefreshCalendarDaysAsync();
             await LoadEventsForSelectedDateAsync();
+        }
+
+        private void OnPropertyChanged(string propertyName)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
 
         private void MakeToolWindowNoActivate()
@@ -486,8 +810,41 @@ namespace EdgeCalendar.App
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"処理中にエラーが発生しました。{Environment.NewLine}{ex.Message}", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.MessageBox.Show($"処理中にエラーが発生しました。{Environment.NewLine}{ex.Message}", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private async Task RunGoogleSafeAsync(Func<Task> action)
+        {
+            try
+            {
+                await action();
+            }
+            catch (GoogleCredentialsMissingException)
+            {
+                if (!await PromptAndSaveGoogleCredentialsAsync())
+                {
+                    return;
+                }
+
+                await RunGoogleSafeAsync(action);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"処理中にエラーが発生しました。{Environment.NewLine}{ex.Message}", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task<bool> PromptAndSaveGoogleCredentialsAsync()
+        {
+            var dialog = new GoogleCredentialsWindow { Owner = this };
+            if (dialog.ShowDialog() != true)
+            {
+                return false;
+            }
+
+            await _credentialStore.SaveAsync(dialog.Credentials);
+            return true;
         }
 
         private static POINT GetCursor()
@@ -531,19 +888,21 @@ namespace EdgeCalendar.App
 
         public sealed class EventListItem
         {
-            public EventListItem(EventItem item)
+            public EventListItem(EventItem item, string colorHex)
             {
                 Item = item;
                 Title = item.Title;
                 TimeLabel = item.IsAllDay
                     ? "終日"
                     : string.Format(CultureInfo.InvariantCulture, "{0:HH:mm}-{1:HH:mm}", item.StartLocal, item.EndLocal);
+                ColorHex = colorHex;
                 IsReadOnly = item.IsReadOnly;
             }
 
             public EventItem Item { get; }
             public string Title { get; }
             public string TimeLabel { get; }
+            public string ColorHex { get; }
             public bool IsReadOnly { get; }
         }
     }

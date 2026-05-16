@@ -9,6 +9,9 @@
         <TextBlock Text="タイトル" Foreground="#B0B0B0" />
         <TextBox x:Name="TitleBox" Margin="0,4,0,12" />
 
+        <TextBlock Text="カレンダー" Foreground="#B0B0B0" />
+        <ComboBox x:Name="CalendarBox" Margin="0,4,0,12" DisplayMemberPath="Summary" />
+
         <TextBlock Text="開始" Foreground="#B0B0B0" />
         <Grid Margin="0,4,0,12">
             <Grid.ColumnDefinitions>

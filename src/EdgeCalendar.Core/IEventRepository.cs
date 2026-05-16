@@ -8,6 +8,7 @@ namespace EdgeCalendar.Core
     {
         Task InitializeAsync();
         Task<IReadOnlyList<EventItem>> GetByDateAsync(DateTime dateLocal);
+        Task<IReadOnlyList<EventItem>> GetByRangeAsync(DateTime startLocal, DateTime endLocal);
         Task<long> CreateAsync(EventItem item);
         Task UpdateAsync(EventItem item);
         Task DeleteAsync(long id);

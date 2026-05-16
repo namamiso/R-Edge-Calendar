@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Windows;
 using EdgeCalendar.Core;
 
@@ -9,13 +11,15 @@ namespace EdgeCalendar.App
     {
         private readonly DateTime _defaultDate;
         private readonly bool _isNew;
+        private readonly bool _allowCalendarSelection;
 
-        public EventEditorWindow(EventItem? item, DateTime defaultDate)
+        public EventEditorWindow(EventItem? item, DateTime defaultDate, IReadOnlyList<CalendarInfo> calendars, string? selectedCalendarId, bool allowCalendarSelection)
         {
             InitializeComponent();
 
             _defaultDate = defaultDate.Date;
             _isNew = item == null;
+            _allowCalendarSelection = allowCalendarSelection;
 
             Item = item ?? new EventItem
             {
@@ -28,10 +32,19 @@ namespace EdgeCalendar.App
 
             Title = _isNew ? "予定の追加" : "予定の編集";
 
+            CalendarBox.ItemsSource = calendars;
+            CalendarBox.IsEnabled = allowCalendarSelection && calendars.Count > 1;
+
+            if (calendars.Count > 0)
+            {
+                var selected = calendars.FirstOrDefault(c => c.Id == selectedCalendarId) ?? calendars[0];
+                CalendarBox.SelectedItem = selected;
+            }
+
             TitleBox.Text = Item.Title;
             StartDatePicker.SelectedDate = Item.StartLocal.Date;
             StartTimeBox.Text = Item.StartLocal.ToString("HH:mm", CultureInfo.InvariantCulture);
-            EndDatePicker.SelectedDate = Item.EndLocal.Date;
+            EndDatePicker.SelectedDate = GetEndDateForUi(Item);
             EndTimeBox.Text = Item.EndLocal.ToString("HH:mm", CultureInfo.InvariantCulture);
             AllDayCheckBox.IsChecked = Item.IsAllDay;
             LocationBox.Text = Item.Location ?? string.Empty;
@@ -41,6 +54,14 @@ namespace EdgeCalendar.App
         }
 
         public EventItem Item { get; }
+
+        public string? SelectedCalendarId
+        {
+            get
+            {
+                return (CalendarBox.SelectedItem as CalendarInfo)?.Id;
+            }
+        }
 
         private void OnAllDayChanged(object sender, RoutedEventArgs e)
         {
@@ -56,10 +77,16 @@ namespace EdgeCalendar.App
 
         private void OnOk(object sender, RoutedEventArgs e)
         {
+            if (_allowCalendarSelection && SelectedCalendarId == null)
+            {
+                System.Windows.MessageBox.Show("カレンダーを選択してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
             var title = TitleBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(title))
             {
-                MessageBox.Show("タイトルを入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("タイトルを入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -72,6 +99,11 @@ namespace EdgeCalendar.App
 
             if (isAllDay)
             {
+                if (endDate < startDate)
+                {
+                    System.Windows.MessageBox.Show("終了日は開始日以降にしてください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
                 start = startDate.Date;
                 end = endDate.Date.AddDays(1);
             }
@@ -79,13 +111,13 @@ namespace EdgeCalendar.App
             {
                 if (!TryParseTime(StartTimeBox.Text, out var startTime))
                 {
-                    MessageBox.Show("開始時刻は HH:mm 形式で入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                    System.Windows.MessageBox.Show("開始時刻は HH:mm 形式で入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
                 if (!TryParseTime(EndTimeBox.Text, out var endTime))
                 {
-                    MessageBox.Show("終了時刻は HH:mm 形式で入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                    System.Windows.MessageBox.Show("終了時刻は HH:mm 形式で入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
 
@@ -95,7 +127,7 @@ namespace EdgeCalendar.App
 
             if (end < start)
             {
-                MessageBox.Show("終了日時は開始日時以降にしてください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("終了日時は開始日時以降にしてください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
@@ -119,6 +151,21 @@ namespace EdgeCalendar.App
         private static bool TryParseTime(string input, out TimeSpan time)
         {
             return TimeSpan.TryParseExact(input.Trim(), new[] { "h\\:mm", "hh\\:mm" }, CultureInfo.InvariantCulture, out time);
+        }
+
+        private static DateTime GetEndDateForUi(EventItem item)
+        {
+            if (!item.IsAllDay)
+            {
+                return item.EndLocal.Date;
+            }
+
+            if (item.EndLocal.Date > item.StartLocal.Date)
+            {
+                return item.EndLocal.Date.AddDays(-1);
+            }
+
+            return item.EndLocal.Date;
         }
     }
 }

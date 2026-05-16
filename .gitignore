@@ -18,6 +18,10 @@ artifacts/
 *.log
 logs/
 Logs/
+UpgradeLog.htm
+
+# Local notes
+ChatGPT-Win11*.txt
 
 # OS
 Thumbs.db

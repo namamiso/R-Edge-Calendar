@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,16 +9,16 @@ using System.Runtime.Versioning;
 namespace EdgeCalendar.Infrastructure
 {
     [SupportedOSPlatform("windows")]
-    public sealed class TokenStore
+    public sealed class GoogleCredentialStore
     {
         private readonly string _path;
 
-        public TokenStore(string? path = null)
+        public GoogleCredentialStore(string? path = null)
         {
             _path = path ?? GetDefaultPath();
         }
 
-        public async Task SaveAsync(OAuthToken token)
+        public async Task SaveAsync(GoogleCredentials credentials)
         {
             var dir = Path.GetDirectoryName(_path);
             if (!string.IsNullOrWhiteSpace(dir))
@@ -26,13 +26,13 @@ namespace EdgeCalendar.Infrastructure
                 Directory.CreateDirectory(dir);
             }
 
-            var json = JsonSerializer.Serialize(token, JsonOptions.Default);
+            var json = JsonSerializer.Serialize(credentials, JsonOptions.Default);
             var bytes = Encoding.UTF8.GetBytes(json);
             var protectedBytes = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
             await File.WriteAllBytesAsync(_path, protectedBytes).ConfigureAwait(false);
         }
 
-        public async Task<OAuthToken?> LoadAsync()
+        public async Task<GoogleCredentials?> LoadAsync()
         {
             if (!File.Exists(_path))
             {
@@ -44,7 +44,7 @@ namespace EdgeCalendar.Infrastructure
                 var protectedBytes = await File.ReadAllBytesAsync(_path).ConfigureAwait(false);
                 var bytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
                 var json = Encoding.UTF8.GetString(bytes);
-                return JsonSerializer.Deserialize<OAuthToken>(json, JsonOptions.Default);
+                return JsonSerializer.Deserialize<GoogleCredentials>(json, JsonOptions.Default);
             }
             catch
             {
@@ -57,18 +57,17 @@ namespace EdgeCalendar.Infrastructure
             var baseDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "EdgeCalendar");
-            return Path.Combine(baseDir, "google_tokens.dat");
+            return Path.Combine(baseDir, "google_credentials.dat");
         }
     }
 
-    public sealed class OAuthToken
+    public sealed class GoogleCredentials
     {
-        public string AccessToken { get; set; } = string.Empty;
-        public string RefreshToken { get; set; } = string.Empty;
-        public DateTimeOffset ExpiresAtUtc { get; set; }
+        public string ClientId { get; set; } = string.Empty;
+        public string ClientSecret { get; set; } = string.Empty;
 
-        public bool HasUsableAccessToken =>
-            !string.IsNullOrWhiteSpace(AccessToken) &&
-            ExpiresAtUtc > DateTimeOffset.UtcNow;
+        public bool IsComplete =>
+            !string.IsNullOrWhiteSpace(ClientId) &&
+            !string.IsNullOrWhiteSpace(ClientSecret);
     }
 }

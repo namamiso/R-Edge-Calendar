@@ -16,6 +16,7 @@ namespace EdgeCalendar.Core
         public string? ExternalId { get; set; }
         public string? CalendarId { get; set; }
         public bool IsReadOnly { get; set; }
+        public string? ETag { get; set; }
 
         public EventItem Clone()
         {
@@ -32,7 +33,8 @@ namespace EdgeCalendar.Core
                 Source = Source,
                 ExternalId = ExternalId,
                 CalendarId = CalendarId,
-                IsReadOnly = IsReadOnly
+                IsReadOnly = IsReadOnly,
+                ETag = ETag
             };
         }
     }
