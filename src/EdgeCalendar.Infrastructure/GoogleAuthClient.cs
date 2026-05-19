@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
@@ -15,6 +16,9 @@ namespace EdgeCalendar.Infrastructure
     [SupportedOSPlatform("windows")]
     public sealed class GoogleAuthClient
     {
+        private const string CalendarScopes =
+            "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+
         private readonly HttpClient _http;
         private readonly TokenStore _store;
         private readonly GoogleCredentialStore _credentialStore;
@@ -57,14 +61,10 @@ namespace EdgeCalendar.Infrastructure
 
         private async Task<GoogleCredentials> GetCredentialsAsync()
         {
-            var envCredentials = new GoogleCredentials
+            var configuredCredentials = GoogleOAuthClientProvider.GetConfiguredCredentials();
+            if (configuredCredentials?.IsComplete == true)
             {
-                ClientId = Environment.GetEnvironmentVariable("EDGE_CALENDAR_GOOGLE_CLIENT_ID") ?? string.Empty,
-                ClientSecret = Environment.GetEnvironmentVariable("EDGE_CALENDAR_GOOGLE_CLIENT_SECRET") ?? string.Empty
-            };
-            if (envCredentials.IsComplete)
-            {
-                return envCredentials;
+                return configuredCredentials;
             }
 
             var storedCredentials = await _credentialStore.LoadAsync().ConfigureAwait(false);
@@ -92,7 +92,7 @@ namespace EdgeCalendar.Infrastructure
             authUrl.Append("?response_type=code");
             authUrl.Append("&client_id=").Append(Uri.EscapeDataString(credentials.ClientId));
             authUrl.Append("&redirect_uri=").Append(Uri.EscapeDataString(redirectUri));
-            authUrl.Append("&scope=").Append(Uri.EscapeDataString("https://www.googleapis.com/auth/calendar"));
+            authUrl.Append("&scope=").Append(Uri.EscapeDataString(CalendarScopes));
             authUrl.Append("&access_type=offline&prompt=consent");
             authUrl.Append("&code_challenge=").Append(Uri.EscapeDataString(codeChallenge));
             authUrl.Append("&code_challenge_method=S256");
@@ -132,19 +132,23 @@ namespace EdgeCalendar.Infrastructure
                 throw new InvalidOperationException("認証コードの取得に失敗しました。");
             }
 
-            var payload = new
+            var payload = new Dictionary<string, string>
             {
-                code,
-                client_id = credentials.ClientId,
-                client_secret = credentials.ClientSecret,
-                redirect_uri = redirectUri,
-                code_verifier = codeVerifier,
-                grant_type = "authorization_code"
+                ["code"] = code,
+                ["client_id"] = credentials.ClientId,
+                ["redirect_uri"] = redirectUri,
+                ["code_verifier"] = codeVerifier,
+                ["grant_type"] = "authorization_code"
             };
+
+            if (!string.IsNullOrWhiteSpace(credentials.ClientSecret))
+            {
+                payload["client_secret"] = credentials.ClientSecret;
+            }
 
             var tokenResponse = await _http.PostAsync(
                 "https://oauth2.googleapis.com/token",
-                new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"))
+                new FormUrlEncodedContent(payload))
                 .ConfigureAwait(false);
 
             tokenResponse.EnsureSuccessStatusCode();
@@ -166,17 +170,21 @@ namespace EdgeCalendar.Infrastructure
 
         private async Task<OAuthToken> RefreshAsync(string refreshToken, GoogleCredentials credentials)
         {
-            var payload = new
+            var payload = new Dictionary<string, string>
             {
-                client_id = credentials.ClientId,
-                client_secret = credentials.ClientSecret,
-                refresh_token = refreshToken,
-                grant_type = "refresh_token"
+                ["client_id"] = credentials.ClientId,
+                ["refresh_token"] = refreshToken,
+                ["grant_type"] = "refresh_token"
             };
+
+            if (!string.IsNullOrWhiteSpace(credentials.ClientSecret))
+            {
+                payload["client_secret"] = credentials.ClientSecret;
+            }
 
             var response = await _http.PostAsync(
                 "https://oauth2.googleapis.com/token",
-                new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"))
+                new FormUrlEncodedContent(payload))
                 .ConfigureAwait(false);
 
             response.EnsureSuccessStatusCode();

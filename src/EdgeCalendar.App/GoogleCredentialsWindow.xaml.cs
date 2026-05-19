@@ -16,13 +16,12 @@ namespace EdgeCalendar.App
         {
             var credentials = new GoogleCredentials
             {
-                ClientId = ClientIdBox.Text.Trim(),
-                ClientSecret = ClientSecretBox.Password.Trim()
+                ClientId = ClientIdBox.Text.Trim()
             };
 
             if (!credentials.IsComplete)
             {
-                System.Windows.MessageBox.Show("Client ID と Client Secret を入力してください。", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
+                System.Windows.MessageBox.Show("Enter a Client ID.", "EdgeCalendar", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 

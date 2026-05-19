@@ -67,7 +67,6 @@ namespace EdgeCalendar.Infrastructure
         public string ClientSecret { get; set; } = string.Empty;
 
         public bool IsComplete =>
-            !string.IsNullOrWhiteSpace(ClientId) &&
-            !string.IsNullOrWhiteSpace(ClientSecret);
+            !string.IsNullOrWhiteSpace(ClientId);
     }
 }

@@ -8,17 +8,59 @@ artifacts/
 *.suo
 *.userosscache
 *.sln.docstates
+/.codex/
+/.agents/
+/AGENTS.md
+/personal-ai-dev-template/
+/prompts/
+/profiles/
+/scripts/ai/
+
+# AI workflow / local project memory
+docs/AI-OPERATIONS.md
+docs/AI_REVIEW_LOG.md
+docs/CURRENT_TASK.md
+docs/DEVLOG.md
+docs/DO_NOT_TOUCH.md
+docs/HANDOFF.md
 
 # VS / VSCode
 .vs/
 .vscode/
 *.code-workspace
+.idea/
+.fleet/
+*.DotSettings.user
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+secrets.*
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+*.cer
+*.crt
+client_secret*.json
+google_credentials*.json
 
 # Logs
 *.log
 logs/
 Logs/
 UpgradeLog.htm
+*.dmp
+*.etl
+*.trace
+
+# Test / coverage outputs
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
 
 # Local notes
 ChatGPT-Win11*.txt
@@ -35,3 +77,12 @@ Desktop.ini
 # MSIX/packaging outputs
 AppPackages/
 BundleArtifacts/
+publish/
+*.nupkg
+*.snupkg
+*.pubxml.user
+*.publishsettings
+*.msix
+*.msixbundle
+*.appinstaller
+*_TemporaryKey.pfx

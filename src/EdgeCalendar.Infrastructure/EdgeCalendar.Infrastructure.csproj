@@ -11,4 +11,11 @@
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(GoogleOAuthClientId)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>GoogleOAuthClientId</_Parameter1>
+      <_Parameter2>$(GoogleOAuthClientId)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

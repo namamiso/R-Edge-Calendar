@@ -20,11 +20,11 @@ namespace EdgeCalendar.App
 {
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        private const int EdgeMinPx = 1;
-        private const int EdgeMaxPx = 10;
+        private const int EdgeMinPx = 2;
+        private const int EdgeMaxPx = 6;
         private const int DwellMs = 100;
         private const int HideGraceMs = 250;
-        private const int PollNormalMs = 50;
+        private const int PollNormalMs = 100;
         private const int PollNearEdgeMs = 16;
         private const int HotkeyId = 0xECAD;
         private const string DefaultEventColor = "#0067C0";
@@ -495,13 +495,8 @@ namespace EdgeCalendar.App
                 return;
             }
 
-            var previousVisibleMonth = _visibleMonth;
             _selectedDate = date.Date;
             _visibleMonth = new DateTime(_selectedDate.Year, _selectedDate.Month, 1);
-            if (_visibleMonth != previousVisibleMonth)
-            {
-                _ = RunGoogleSafeAsync(SyncVisibleMonthAsync);
-            }
 
             await RunSafeAsync(RefreshCalendarDaysAsync);
             await RunSafeAsync(LoadEventsForSelectedDateAsync);
@@ -513,7 +508,6 @@ namespace EdgeCalendar.App
             _selectedDate = _visibleMonth;
             await RunSafeAsync(RefreshCalendarDaysAsync);
             await RunSafeAsync(LoadEventsForSelectedDateAsync);
-            _ = RunGoogleSafeAsync(SyncVisibleMonthAsync);
         }
 
         private async void OnNextMonthClick(object sender, RoutedEventArgs e)
@@ -522,7 +516,6 @@ namespace EdgeCalendar.App
             _selectedDate = _visibleMonth;
             await RunSafeAsync(RefreshCalendarDaysAsync);
             await RunSafeAsync(LoadEventsForSelectedDateAsync);
-            _ = RunGoogleSafeAsync(SyncVisibleMonthAsync);
         }
 
         private void OnEventSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -668,7 +661,7 @@ namespace EdgeCalendar.App
 
         private async void OnSyncClick(object sender, RoutedEventArgs e)
         {
-            await RunGoogleSafeAsync(SyncVisibleMonthAsync);
+            await RunGoogleSafeAsync(SyncAsync);
         }
 
         private async void OnCalendarsClick(object sender, RoutedEventArgs e)
@@ -740,13 +733,6 @@ namespace EdgeCalendar.App
         {
             var windowStart = DateTime.Today.AddDays(-31);
             var windowEnd = DateTime.Today.AddDays(32);
-            await SyncRangeAsync(windowStart, windowEnd);
-        }
-
-        private async Task SyncVisibleMonthAsync()
-        {
-            var windowStart = _visibleMonth.Date;
-            var windowEnd = _visibleMonth.AddMonths(1).Date;
             await SyncRangeAsync(windowStart, windowEnd);
         }
 

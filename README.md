@@ -16,11 +16,13 @@ Lightweight Windows 11 resident calendar panel.
 
 ## Build
 - dotnet build
+- Release builds that include Google sign-in require an OAuth Client ID injected at publish time; see docs/OAUTH.md and docs/RELEASE.md.
 
 ## Docs
 - docs/PRD.md (requirements)
 - docs/UI-SPEC.md (panel behavior)
 - docs/SYNC-SPEC.md (sync rules)
+- docs/OAUTH.md (Google OAuth setup)
 - docs/ADR/ (architecture decisions)
 - docs/RELEASE.md (release steps)
 
