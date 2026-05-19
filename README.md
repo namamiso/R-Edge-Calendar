@@ -28,3 +28,4 @@ Lightweight Windows 11 resident calendar panel.
 
 ## Security
 - docs/SECURITY.md
+- PRIVACY.md

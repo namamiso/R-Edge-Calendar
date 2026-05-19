@@ -7,6 +7,7 @@ namespace EdgeCalendar.Infrastructure
     public static class GoogleOAuthClientProvider
     {
         private const string ClientIdMetadataKey = "GoogleOAuthClientId";
+        private const string ClientSecretMetadataKey = "GoogleOAuthClientSecret";
         private const string ClientIdEnvironmentVariable = "EDGE_CALENDAR_GOOGLE_CLIENT_ID";
         private const string ClientSecretEnvironmentVariable = "EDGE_CALENDAR_GOOGLE_CLIENT_SECRET";
 
@@ -30,9 +31,16 @@ namespace EdgeCalendar.Infrastructure
 
             if (!string.IsNullOrWhiteSpace(metadataClientId))
             {
+                var metadataClientSecret = Assembly
+                    .GetExecutingAssembly()
+                    .GetCustomAttributes<AssemblyMetadataAttribute>()
+                    .FirstOrDefault(a => string.Equals(a.Key, ClientSecretMetadataKey, StringComparison.Ordinal))
+                    ?.Value;
+
                 return new GoogleCredentials
                 {
-                    ClientId = metadataClientId.Trim()
+                    ClientId = metadataClientId.Trim(),
+                    ClientSecret = metadataClientSecret?.Trim() ?? string.Empty
                 };
             }
 

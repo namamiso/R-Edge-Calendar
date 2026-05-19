@@ -151,8 +151,8 @@ namespace EdgeCalendar.Infrastructure
                 new FormUrlEncodedContent(payload))
                 .ConfigureAwait(false);
 
-            tokenResponse.EnsureSuccessStatusCode();
             var json = await tokenResponse.Content.ReadAsStringAsync().ConfigureAwait(false);
+            EnsureTokenSuccess(tokenResponse, json);
             var token = JsonSerializer.Deserialize<OAuthTokenResponse>(json, JsonOptions.Default)
                         ?? throw new InvalidOperationException("トークン応答の解析に失敗しました。");
             if (string.IsNullOrWhiteSpace(token.AccessToken))
@@ -187,8 +187,8 @@ namespace EdgeCalendar.Infrastructure
                 new FormUrlEncodedContent(payload))
                 .ConfigureAwait(false);
 
-            response.EnsureSuccessStatusCode();
             var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            EnsureTokenSuccess(response, json);
             var token = JsonSerializer.Deserialize<OAuthTokenResponse>(json, JsonOptions.Default)
                         ?? throw new InvalidOperationException("トークン応答の解析に失敗しました。");
             if (string.IsNullOrWhiteSpace(token.AccessToken))
@@ -202,6 +202,17 @@ namespace EdgeCalendar.Infrastructure
                 RefreshToken = string.IsNullOrWhiteSpace(token.RefreshToken) ? refreshToken : token.RefreshToken,
                 ExpiresAtUtc = DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn)
             };
+        }
+
+        private static void EnsureTokenSuccess(HttpResponseMessage response, string responseBody)
+        {
+            if (response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"Googleトークン取得に失敗しました: {(int)response.StatusCode} {response.ReasonPhrase}{Environment.NewLine}{responseBody}");
         }
 
         private static string CreateCodeVerifier()

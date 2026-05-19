@@ -23,6 +23,11 @@ namespace EdgeCalendar.Infrastructure
             _auth = auth;
         }
 
+        public async Task EnsureAuthenticatedAsync()
+        {
+            _ = await _auth.GetAccessTokenAsync().ConfigureAwait(false);
+        }
+
         public async Task<IReadOnlyList<CalendarInfo>> GetCalendarsAsync()
         {
             var request = new HttpRequestMessage(HttpMethod.Get, "https://www.googleapis.com/calendar/v3/users/me/calendarList");

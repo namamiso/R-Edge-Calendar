@@ -20,7 +20,7 @@ namespace EdgeCalendar.App
 {
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        private const int EdgeMinPx = 2;
+        private const int EdgeMinPx = 1;
         private const int EdgeMaxPx = 6;
         private const int DwellMs = 100;
         private const int HideGraceMs = 250;
@@ -74,6 +74,7 @@ namespace EdgeCalendar.App
                 HideInstant();
                 await RunSafeAsync(InitializeAsync);
                 _timer.Start();
+                _ = RunGoogleSafeAsync(EnsureGoogleAuthenticatedAsync);
             };
 
             Closing += OnClosing;
@@ -734,6 +735,11 @@ namespace EdgeCalendar.App
             var windowStart = DateTime.Today.AddDays(-31);
             var windowEnd = DateTime.Today.AddDays(32);
             await SyncRangeAsync(windowStart, windowEnd);
+        }
+
+        private async Task EnsureGoogleAuthenticatedAsync()
+        {
+            await _calendarClient.EnsureAuthenticatedAsync();
         }
 
         private async Task SyncRangeAsync(DateTime windowStart, DateTime windowEnd)
